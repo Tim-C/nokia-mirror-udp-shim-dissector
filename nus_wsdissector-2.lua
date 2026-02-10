@@ -3,11 +3,13 @@
 -- Nokia UDP SHIM Protocol Wireshark Dissector
 -- Version 1.0.1
 -- 2021, March
+-- Version 1.0.2
+-- 2026, February
 --
 
 -- ## Add dissector info ##
 local nus_info = {
-    version = "1.0.1",
+    version = "1.0.2",
     author = "Doug", -- You can change this of course
     -- repository = ""
 }
@@ -16,7 +18,9 @@ set_plugin_info(nus_info)
 
 -- ## Configuration of dissector ##
     -- Byte order. Set to false to enable Big Endian mode
-local is_litle_endian   = false
+-- local is_litle_endian   = true
+-- ## lua 5.3+
+local is_litle_endian = (string.pack("i2", 1):byte(1) == 1)
     -- UDP port. Default is 30000
 local shim_port         = 30000
     -- Possible Ethernet dissectors: eth_withoutfcs, eth_withfcs or eth_maybefcs
@@ -50,7 +54,7 @@ function shim_protocol.dissector(buffer, pinfo, tree)
     
     -- If, for some reason, there is no read data for the packet, then
     -- we do not have hothing to dissect
-	if length == 0 then return end
+	if length < 4 then return end
 
     -- Name to be shown at 'protocol' column
 	--pinfo.cols.protocol = shim_protocol.name
@@ -66,22 +70,29 @@ function shim_protocol.dissector(buffer, pinfo, tree)
 
     -- Get all the 32 bits of the header, 
     -- that is the first 4 bytes of packet data
-    local shif_header = buffer(0,4):le_uint()
+    local shim_header = ByteArray.new("00 00 00 00")
     if is_litle_endian then
-        shif_header = buffer(0,4):le_uint()
+        shim_header = buffer(0,4):le_uint()
     else
-        shif_header = buffer(0,4):uint()
+        shim_header = buffer(0,4):uint()
     end
 
     -- Decode the bits from first byte
-    local version = bit32.extract(shif_header, 28, 4)
-    local direction = bit32.extract(shif_header, 27, 1)
-    local mirror_type = bit32.extract(shif_header, 26, 1)
-    local filter_action = bit32.extract(shif_header, 25, 1)
-    local int_ref_type = bit32.extract(shif_header, 24, 1)
+    -- local version = bit32.extract(shim_header, 28, 4)
+    -- local direction = bit32.extract(shim_header, 27, 1)
+    -- local mirror_type = bit32.extract(shim_header, 26, 1)
+    -- local filter_action = bit32.extract(shim_header, 25, 1)
+    -- local int_ref_type = bit32.extract(shim_header, 24, 1)
+    
+    local version = (shim_header & 240) >> 4
+    local direction = (shim_header & 8) >> 3
+    local mirror_type = (shim_header & 4) >> 2
+    local filter_action = (shim_header & 2) >> 1
+    local int_ref_type = shim_header & 1
 
     -- Not needed as it corresponds to 3 entire bytes
-    -- local interface = bit32.extract(shif_header, 0, 24)
+    -- local interface = bit32.extract(shim_header, 0, 24)
+    local interface = ((shim_header & 4278190080) >> 24) + ((shim_header & 16711680) >> 8) +  ((shim_header & 65280) << 8)
 
     -- Generate short description strings for fields values
     local direction_str = 'Ingress'    
@@ -104,7 +115,7 @@ function shim_protocol.dissector(buffer, pinfo, tree)
         headerSubtree:add_le(fd_filter_action, filter_action):append_text(" (" .. filter_action_str .. ")")
         headerSubtree:add_le(fd_int_ref_type, int_ref_type):append_text(" (" .. int_ref_type_str .. ")")
         --headerSubtree:add_le(fd_interface, interface)
-        headerSubtree:add_le(fd_interface, buffer(1,3))
+        headerSubtree:add_le(fd_interface, interface)
     else
         headerSubtree:add(fd_version, version)
         headerSubtree:add(fd_direction, direction):append_text(" (" .. direction_str .. ")")
@@ -112,7 +123,7 @@ function shim_protocol.dissector(buffer, pinfo, tree)
         headerSubtree:add(fd_filter_action, filter_action):append_text(" (" .. filter_action_str .. ")")
         headerSubtree:add(fd_int_ref_type, int_ref_type):append_text(" (" .. int_ref_type_str .. ")")
         --headerSubtree:add(fd_interface, interface)
-        headerSubtree:add(fd_interface, buffer(1,3))
+        headerSubtree:add(fd_interface, interface)
     end
 
     -- $$ PAYLOAD $$
